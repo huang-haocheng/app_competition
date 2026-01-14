@@ -33,17 +33,12 @@
 
 ### 环境要求
 - Python 3.10+
-- 依赖管理：pip
+- 依赖管理：pip/conda
 
 ### 安装依赖
 ```bash
 pip install -r requirements.txt
 ```
-
-### 配置文件
-项目需要以下配置文件：
-- `.env`：环境变量配置
-- `director_assistant.json`：客户端配置
 
 ## 使用流程
 
