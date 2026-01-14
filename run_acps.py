@@ -311,12 +311,24 @@ def extract_idea(ai_single_reply):
 class PersonalAssistantOrchestrator:
     def __init__(self, clients: Dict[str, AipRpcClient],userfile:UserFile):
         #self.clients = clients
-
+        self.userfile = userfile
+        self.project_name = input("请输入项目名称: ")
+        if self.project_name not in self.userfile.user_project:
+            self.project_name = self.userfile.init_project(self.project_name)
+            self.main_session_id = f"session-{uuid.uuid4()}"
+        else:
+            self.main_session_id = self.userfile.project_content[self.project_name]['session_id']
+        
+        if self.userfile.user == 'czx':
+            self.mode = input("test or use:")
+        else:
+            self.mode = 'use'
+        logger.info("event=cli_start session_id=%s user=%s", self.main_session_id,self.userfile.user)
         # 关键字注册表：支持用自然语言别名查找底层客户端。
         #self.registry = AgentRegistry(clients, AGENT_KEYWORD_ALIASES)
         #self.assistant = Assistant()
         self._history_store: Dict[str, List[AIMessage | HumanMessage | SystemMessage]] = {}
-        self._sessions: Dict[str, Dict[str, Any]] = {}
+        self._sessions: Dict[str, Dict[str, Any]] = {}##会话记录加载到这里
 
         self.outline = None
         self.screen = []
@@ -325,9 +337,7 @@ class PersonalAssistantOrchestrator:
         self.outline_writer = OutlineWriter()
         self.screen_writer = ScreenWriter()
         
-        self.userfile = userfile
-        self.project_name = input("请输入项目名称: ")
-        self.project_name = self.userfile.init_project(self.project_name)
+        
         self.animator = Animator(name=self.project_name,download_link=self.userfile.file_path)
         
     # 构建 LangGraph 状态图，节点集合与 a2a 版本保持一致（intent/confirm/workflow/chat/decline）。
@@ -361,7 +371,9 @@ class PersonalAssistantOrchestrator:
         session_data = state["session_data"]
         now_task = session_data["now_task"]
         material = session_data["material"]
-        print(material)
+        if self.mode == 'test':
+            print(session_data)
+            return f'call {now_task}'
         if now_task == "outline":
             res = self.outline_writer.call(session_data)
             state["session_data"]["material"]["outline"] = res
@@ -419,8 +431,11 @@ class PersonalAssistantOrchestrator:
             state['session_data']["now_state"] = "None"
             state['reply'] = AssistantReply(agentans)
             return state
-            
-        ans = self.assistant.call(user_text,session_data)
+        
+        if self.mode == 'test':
+            ans = '这里是assistant'
+        else:
+            ans = self.assistant.call(user_text,session_data)
         idea = extract_idea(ans)
         if now_task == "imagination":
             if len(idea)!=0:
@@ -479,7 +494,7 @@ class PersonalAssistantOrchestrator:
             return "assistant"
         
 
-    async def handle_user_input(self, session_id: str, user_input: str) -> AssistantReply:
+    async def handle_user_input(self, session_id: str) -> AssistantReply:
         """主入口：接收用户文本并交由 LangGraph 路由，返回回复。
 
         Args:
@@ -489,13 +504,11 @@ class PersonalAssistantOrchestrator:
         Returns:
             `AssistantReply`，包含文本、是否等待后续输入及结束标识。
         """
-        text = (user_input or "").strip()
-        if not text:
-            return AssistantReply("请告诉我您的需求或问题，我会尽力帮助。")
-        if text.lower() in EXIT_COMMANDS:
-            self._sessions.pop(session_id, None)
-            self._history_store.pop(session_id, None)
-            return AssistantReply("好的，会话已结束，欢迎随时再来。", awaiting_followup=False, end_session=True)
+        # if text.lower() in EXIT_COMMANDS:
+        #     self._sessions.pop(session_id, None)
+        #     self._history_store.pop(session_id, None)
+        #     return AssistantReply("好的，会话已结束，欢迎随时再来。", awaiting_followup=False, end_session=True)
+        ##以上代码暂时废弃
 
         session_data = self._get_session_state(session_id)
 
@@ -503,21 +516,26 @@ class PersonalAssistantOrchestrator:
             """统一在返回前递增消息计数并回传回复。"""
             session_data["message_count"] = session_data.get("message_count", 0) + 1
             return reply
-
+        print('session_history:',session_data)##加载会话记录后，这里可以继续之前中断的任务
         graph_state: ChatGraphState = {
             "session_id": session_id,
-            "user_input": text,
+            "user_input": '',
             "session_data": session_data,
         }
         graph_state["session_data"] = self.intend(graph_state)
+        user_input = input("用户：").strip()
+        text = (user_input or "").strip()
+        if not text:
+            return AssistantReply("请告诉我您的需求或问题，我会尽力帮助。")
         # 通过 LangGraph 统一路由当前对话输入。
+        graph_state['user_input'] = text
         result_state = await self._graph.ainvoke(graph_state)
         reply = result_state.get("reply")
         if not isinstance(reply, AssistantReply):
             fallback_text = result_state.get("response", "抱歉，我暂时无法处理该请求。")
             reply = AssistantReply(str(fallback_text))
         print(result_state['session_data'])
-        self.userfile.save_content(self.project_name,result_state['session_data']['material'])
+        self.userfile.save_content(self.project_name,result_state['session_data']['material'],result_state['session_id'])
         # 维护对话轮次计数，便于后续做上下文压缩等扩展。
         return _finalize(reply)
 
@@ -597,14 +615,14 @@ def run_test():
     user = 'czx'
     userfile = UserFile(user)
     orchestrator = PersonalAssistantOrchestrator(clients=None,userfile=userfile)
-    session_id = f"session-{uuid.uuid4()}"
-    
-    logger.info("event=cli_start session_id=%s user=%s", session_id,user)
-    
+    session_id = orchestrator.main_session_id
     while 1:
-        user_input = input("用户: ").strip()
-        reply = asyncio.run(orchestrator.handle_user_input(session_id, user_input))
-        print(f"助手: {reply.text}\n")
+        reply = asyncio.run(orchestrator.handle_user_input(session_id))
+        if isinstance(reply.text, str):
+            print(f"助手: {reply.text}\n")
+        if isinstance(reply.text, list):
+            for item in reply.text:
+                print(item)
         if reply.end_session:
             break
 

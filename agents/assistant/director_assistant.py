@@ -67,7 +67,7 @@ class Assistant:
         material = session_data["material"]
         modify_material = None
         if session_data['modify_num'] != None:
-            modify_material = session_data['material'][session_data['modify_num']-1]
+            modify_material = session_data['material'][now_task][session_data['modify_num']-1]
         if not self.last_id:
             return self.init_assistant()
         input_prompt = [

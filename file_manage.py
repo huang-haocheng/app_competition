@@ -3,12 +3,15 @@ import json
 
 class UserFile:
     def __init__(self,user):
+        ##这里需要添加保存会话记录到用户文件夹下，以及还需要一个用户加载会话记录的函数
         self.user = user
         self.file_path = f'./user_files/{user}'
         if not os.path.exists(self.file_path):
             os.makedirs(self.file_path)
         self.user_project = os.listdir(self.file_path)
         self.project_content = {}
+        for i in self.user_project:
+            self.project_content[i] = self.load_content(i)
     
     def init_project(self,project_name):
         i = 1
@@ -17,7 +20,7 @@ class UserFile:
             new_project_name = f"{project_name}_{i}"
             i += 1
         self.user_project.append(new_project_name)
-        self.project_content[new_project_name] = {}
+        self.project_content[new_project_name] = None
         os.makedirs(os.path.join(self.file_path,new_project_name))
         return new_project_name
     
@@ -28,10 +31,15 @@ class UserFile:
             self.project_content[project_name] = json.load(file)
         return self.project_content[project_name]
     
-    def save_content(self,project_name,content):
+    def save_content(self,project_name,material,session_id):
         if project_name not in self.user_project:
             os.makedirs(os.path.join(self.file_path,project_name))
             self.user_project.append(project_name)
-        self.project_content[project_name] = content
+        self.project_content[project_name]['material'] = material
+        self.project_content[project_name]['session_id'] = session_id
         with open(os.path.join(self.file_path,project_name, 'project.json'), 'w', encoding='utf-8') as file:
             json.dump(content, file, ensure_ascii=False, indent=4)
+    
+    def save_session(self,session_id,session_data):
+        pass
+            

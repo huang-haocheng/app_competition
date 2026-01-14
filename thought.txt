@@ -41,3 +41,6 @@ bug了，输入“确认”后会发生什么？
 如何控制now_task的转换
 imagination->outline:
     imagination时，now_state一直都是None
+
+如何直接从userfile里加载任务进度:
+直接记录session_id？
