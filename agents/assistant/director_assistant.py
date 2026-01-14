@@ -10,8 +10,26 @@ from a2a.utils import (completed_task, new_artifact)
 from a2a.utils.errors import ServerError
 import asyncio
 #from langchain.checkpoint.memory import InMemorySaver
-import prompt_hub
+from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
+
 import time
+
+
+assistant_prompt = PromptTemplate.from_template('''
+你是一个充满活力的导演助手，正在辅助用户使用视频生成模型进行创作。你的任务是{task}。必要的时候，请上网搜索资料。
+用户没有使用视频生成模型的经验，因此不知道如何在提示词中表达他的想法。此外，用户还很有可能没有进行过视频创作，不知道创作一个视频需要确认哪些要素
+每次给用户返回信息时，必须在信息的最开头加上当前你与用户确认过的想法，例如：“当前我们的想法是做一个...”
+当你认为需求的要素齐全后，可以在最后确认需求后，将需求递交给writer智能体。
+！注意！以上的对话只是一个示例，用户真正的输入在'user'部分，用户若没有提到他的需求，想法确认部分就写“当前我们还没有确认过的想法。”
+你回复的内容只是视频制作的思路，不需要太过详细，详细的内容会由后续的智能体生成
+''')
+
+task_to_prompt = {
+    "imagination":"和用户对话以帮用户寻找灵感，或引导用户将用户的灵感变成具体的想法。",
+    "outline":"和用户对话，确认他想要如何修改大纲，确保他的修改方向与他的想法相符。",
+    "screen":"和用户对话，确认他想要如何修改分镜脚本，确保想法足够准确",
+}
+
 
 # 请确保您已将 API Key 存储在环境变量 ARK_API_KEY 中
 # 初始化Ark客户端，从环境变量中读取您的API Key
@@ -22,26 +40,6 @@ client = Ark(
     api_key='c96dbd1f-aeab-461c-90d6-8096b0baeecd',
 )
 
-def test_model():
-    completion = client.chat.completions.create(
-    # 指定您创建的方舟推理接入点 ID，此处已帮您修改为您的推理接入点 ID
-        model="doubao-seed-1-6-251015",
-        tools = [{"type":"web_search"}],
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text", 
-                        "text": "帮我找一下最近很火的纪录片题材有哪些"
-                    },
-                ],
-            }
-        ],
-        reasoning_effort="medium",
-        
-    )
-    print(completion.choices[0].message.content)
 
 class Assistant:
     def __init__(self):
@@ -51,11 +49,10 @@ class Assistant:
         completion = client.responses.create(
         # 指定您创建的方舟推理接入点 ID，此处已帮您修改为您的推理接入点 ID
             model="doubao-seed-1-6-251015",
-            tools = [{"type":"web_search"}],
             input=[
                 {
                     'role':'system',
-                    'content':prompt_hub.assistant_prompt
+                    'content':assistant_prompt.invoke({'task':task_to_prompt["imagination"]}).to_string()
                 }
             ],
             caching={"type": "enabled"}, 
@@ -65,20 +62,38 @@ class Assistant:
         self.last_id = completion.id
         return completion.output[-1].content[0].text
     
-    def call(self, message: str) -> str:
+    def call(self, message: str,session_data:dict) -> str:
+        now_task = session_data["now_task"]
+        material = session_data["material"]
+        modify_material = None
+        if session_data['modify_num'] != None:
+            modify_material = session_data['material'][session_data['modify_num']-1]
         if not self.last_id:
             return self.init_assistant()
-        completion = client.responses.create(
-        # 指定您创建的方舟推理接入点 ID，此处已帮您修改为您的推理接入点 ID
-            model="doubao-seed-1-6-251015",
-            previous_response_id = self.last_id,
-            tools = [{"type":"web_search"}],
-            input=[
+        input_prompt = [
+                {
+                    'role':'system',
+                    'content':assistant_prompt.invoke({'task':task_to_prompt[now_task]}).to_string()
+                },
+                {
+                    'role':'system',
+                    'content':'现有材料：'+json.dumps(material, ensure_ascii=False)
+                },
                 {
                     'role':'user',
                     'content':message
                 }
-            ],
+            ]
+        if modify_material != None:
+            input_prompt.append({
+                'role':'system',
+                'content':'现在我们需要修改的内容：'+modify_material
+            })
+        completion = client.responses.create(
+        # 指定您创建的方舟推理接入点 ID，此处已帮您修改为您的推理接入点 ID
+            model="doubao-seed-1-6-251015",
+            previous_response_id = self.last_id,
+            input=input_prompt,
             caching={"type": "enabled"}, 
             thinking={"type": "disabled"},
             expire_at=int(time.time()) + 360

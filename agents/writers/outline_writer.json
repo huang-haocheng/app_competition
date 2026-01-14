@@ -1,0 +1,66 @@
+{
+  "aic": "10001000011K9HO3SD1QHCZMEZ3UIZ28",
+  "active": true,
+  "protocolVersion": "01.00",
+  "name": "OutlineWriter",
+  "description": "根据用户需求生成分镜大纲的 ACPs 兼容服务",
+  "version": "1.0.0",
+  "webAppUrl":"http://13.236.177.52:8032/outline_writer",
+  "provider": {
+    "organization": "北京邮电大学",
+    "department": "国际学院",
+    "url": "",
+    "license": "大模型智能体原理及应用-2024213429-陈子轩"
+  },
+  "securitySchemes": {
+    "mtls": {
+      "type": "mutualTLS",
+      "description": "智能体间 mTLS 双向认证",
+      "x-caChallengeBaseUrl": "http://13.236.177.52:8004/acps-atr-v1"
+    }
+  },
+  "endPoints": [
+    {
+      "url": "http://13.236.177.52:8032/outline_writer",
+      "transport": "JSONRPC",
+      "security": [
+        {
+          "mtls": []
+        }
+      ]
+    }
+  ],
+  "capabilities": {
+    "streaming": false,
+    "notification": false,
+    "messageQueue": []
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "skills": [
+    {
+      "id": "OutlineWriter.chat",
+      "name": "chat",
+      "description": "和用户对话，根据用户需求生成分镜大纲",
+      "version": "1.0.0",
+      "tags": [
+        "写作",
+        "分镜大纲"
+      ],
+      "examples": [
+        "我今天想做一个纪录片，主要讲荷兰的地理知识，摄影风格可以参考BBC的《国家地理》。帮我写一个分镜大纲"
+      ],
+      "inputModes": [
+        "text/plain"
+      ],
+      "outputModes": [
+        "text/plain"
+      ]
+    }
+  ],
+  "lastModifiedTime": ""
+}

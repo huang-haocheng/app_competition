@@ -1,26 +1,27 @@
 {
-  "aic": "",
+  "aic": "10001000011K90TEAAEN4ISPKU7P7K44",
   "active": true,
   "protocolVersion": "01.00",
   "name": "DirectorAssistant",
   "description": "和用户对话，帮助用户组织各种提示词，并调用联网搜索工具帮用户搜集相关资料",
   "version": "1.0.0",
+  "webAppUrl":"http://13.236.177.52:8031/director_assistant",
   "provider": {
-    "organization": "陈子轩",
-    "department": "北京邮电大学国际学院物联网工程2024215113班",
+    "organization": "北京邮电大学",
+    "department": "国际学院",
     "url": "https://example.com",
-    "license": "示例 ICP 备案号"
+    "license": "大模型智能体原理及应用-2024213429-陈子轩"
   },
   "securitySchemes": {
     "mtls": {
       "type": "mutualTLS",
       "description": "智能体间 mTLS 双向认证",
-      "x-caChallengeBaseUrl": "http://10.129.34.151:5000/upload-cert"
+      "x-caChallengeBaseUrl": "http://13.236.177.52:8004/acps-atr-v1"
     }
   },
   "endPoints": [
     {
-      "url": "http://10.129.34.151:5000/director_assistant",
+      "url": "http://13.236.177.52:8031/director_assistant",
       "transport": "JSONRPC",
       "security": [
         {
@@ -44,12 +45,13 @@
     {
       "id": "DirectorAssistant.chat",
       "name": "chat",
-      "description": "和用户对话，帮助用户组织各种提示词",
+      "description": "和用户对话，帮助用户组织各种提示词，协助用户完成AIGC自媒体创作",
       "version": "1.0.0",
       "tags": [
         "chat",
         "对话",
-        "需求组织"
+        "提示词构建",
+        "AIGC自媒体创作"
       ],
       "examples": [
         "我今天想做一个纪录片"

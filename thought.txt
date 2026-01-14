@@ -1,0 +1,43 @@
+每次输入都是给到助手，助手转发给对应的智能体？
+每次智能体处理完后，会返回结果给助手，助手展示给用户
+那修改？怎么做
+助手得到需要修改的指令->与用户交流确认->转发给对应智能体进行修改
+所有内容都应存放在PersonalOrchestrator中
+
+修改工作流怎么做？
+outline修改：
+修改请求会先输入到assistant节点，assistant需要跟用户交流，确认用户的真实意图
+现在的情况是用户一旦完成了imagination任务，session里的now_task变成outline，条件边就会
+直接把用户输入路由到outline节点，assistant没有机会和用户对话
+目前的思路是，assistant在收到“确认”后，把idea交给outline然后立即回到“chat_with_assistant
+此时now_task不能保持在outline
+使用新成员”chatwithassistant“，路由节点当该值为true时固定返回END
+
+又回到了状态图转换的问题，如何区分用户的”确认“是确认大纲还是修改建议？
+增添”modify_outline”的task？那样好丑陋，有没有别的方法？
+转变路由思路？不按"now_task"进行路由，按"call"路由
+outline、screen、animation都在assistant节点进行
+assistant收到”确认“后，根据"now_task" call agent
+怎么call？
+有call_agents的函数，传递now_task，call对应的agent
+那就不需要langgraph了，气笑了
+但我还是要用，增加程序复杂度，以及需要session_id，以便后续使用acps
+
+状态图转换的问题解决了，但还是无法确认用户的确认究竟是进入下一阶段还是要call agent
+简而言之，如何控制modify环节和create环节的转换
+加入intend节点？确认用户的想法
+now_task为imagination时，直接进入assistant对话环节
+assistant第一次call agent后（即now_task不为imagination），intend节点开始发挥作用
+intend询问：您是否觉得内容需要修改？
+None模式：”需要修改“进入modify模式，
+        ”不需要“now_task进入下一个阶段，进入create？
+modify模式：不询问
+create模式：assistant直接call
+那就需要assistant每次call agent后将modify改为None
+检查一下
+
+bug了，输入“确认”后会发生什么？
+
+如何控制now_task的转换
+imagination->outline:
+    imagination时，now_state一直都是None

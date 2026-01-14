@@ -1,4 +1,4 @@
-from openai import OpenAI
+from volcenginesdkarkruntime import Ark
 import json
 import os
 from a2a.server.agent_execution.agent_executor import AgentExecutor
@@ -8,32 +8,18 @@ from a2a.types import (Part, Task, TextPart, UnsupportedOperationError)
 from a2a.utils import (completed_task, new_artifact)
 from a2a.utils.errors import ServerError
 import asyncio
+import time
 
-client = OpenAI(
-    api_key="sk-f1b0e7db0bc446638c8b1595581d45ac",
-    base_url="https://api.deepseek.com"
+
+
+client = Ark(
+    base_url="https://ark.cn-beijing.volces.com/api/v3",
+    api_key='c96dbd1f-aeab-461c-90d6-8096b0baeecd',
 )
 
 
 change_outline_prompt = '''
 你是一个编剧，请根据用户提供的大纲建议，在大纲基础上进行修改，确保大纲内容与用户需求相符。
-'''
-
-change_screen_prompt = '''
-你是一个编剧，请根据用户提供的修改建议，在分镜基础上进行修改，确保分镜内容与用户需求和大纲相符。
-'''
-
-script_example = '''
-【场景】米勒星球的浅海区域，海面呈深蓝灰色且平静无波，泛着微弱反光，远处海平面矗立着形似 “山峦” 的巨大轮廓，背景悬着黑洞，投射出淡紫色引力光晕；徘徊者号飞船平稳着陆浅海，船体下半部分浸在水中，布兰德、道尔在不远处的米勒飞船残骸（半浸水中，金属外壳锈蚀、零件散落）旁探寻，库珀留守驾驶舱内观察。
-【角色】库珀（驾驶舱内，身着航天服，双手轻搭操控杆，初始神情专注，后骤然紧绷）、布兰德（残骸旁弯腰，单手扶着残骸边缘，另一只手伸向内部数据接口，专注操作）、道尔（布兰德侧后方站立，身体微侧，目光扫过周围环境，保持警惕姿态）
-【风格】科幻写实风格，冷色调为主（深蓝灰海面、银灰航天服、暗紫黑洞光晕），高对比度，光影层次分明（黑洞光晕照亮海面局部，残骸投射深色阴影，驾驶舱内仪器蓝光形成局部亮面）
-【镜头】1. 初始镜头：固定特写，聚焦驾驶舱内库珀面部，画面中心为其双眼，舷窗边缘作为背景框，窗外 “山峦” 轮廓模糊可见；2. 过渡镜头：极速拉远，镜头从面部特写快速拉升至全景，过程带轻微动态模糊，逐步展现驾驶舱、飞船整体、浅海海面及残骸区域；3. 聚焦镜头：拉远后短暂定格全景，随后镜头轻微下移并聚焦海面上的布兰德与道尔，突出二人未察觉危机的状态，同时清晰呈现 “山峦” 实为巨型巨浪的全貌（高约千米，灰黑主体裹挟白色泡沫，底部阴影笼罩海面）；4. 收尾镜头：镜头轻微回拉，再次带起飞船与巨浪的相对位置，强化飞船与人物在巨浪前的渺小感
-【对白】
-（库珀）：（瞳孔收缩，难以置信地低声颤抖）那不是山，那是个浪。
-【音效】紧张急促的管弦乐背景音乐（随镜头拉远逐渐增强），巨浪移动时的沉闷低频轰鸣（从微弱到清晰），驾驶舱内仪器的轻微电子提示音，布兰德操作时的细微金属碰撞音，后续布兰德 “再给我 10 秒” 的模糊惊呼前置音
-'''
-abstract_example = '''
-库珀顺利完成了在米勒星球的降落，米勒星球是一个被海洋覆盖的星球，远处有一个类似 “山峦” 的巨大轮廓，他们走下飞船寻找米勒飞行器的残骸，这时库珀发现原来”山峦“是一个数十米高的巨浪，于是他紧急呼叫两位同伴回飞船。
 '''
 
 outline_example = f'''
@@ -63,10 +49,32 @@ outline_example = f'''
 /
 '''
 
+change_screen_prompt = '''
+你是一个编剧，请根据用户提供的修改建议，在分镜基础上进行修改，确保分镜内容与用户需求和大纲相符。
+'''
+
+script_example = '''
+镜号 1
+【场景】米勒星球的浅海区域，海面呈深蓝灰色且平静无波，泛着微弱反光，远处海平面矗立着形似 “山峦” 的巨大轮廓，背景悬着黑洞，投射出淡紫色引力光晕；徘徊者号飞船平稳着陆浅海，船体下半部分浸在水中，布兰德、道尔在不远处的米勒飞船残骸（半浸水中，金属外壳锈蚀、零件散落）旁探寻，库珀留守驾驶舱内观察。
+【角色】库珀（驾驶舱内，身着航天服，双手轻搭操控杆，初始神情专注，后骤然紧绷）、布兰德（残骸旁弯腰，单手扶着残骸边缘，另一只手伸向内部数据接口，专注操作）、道尔（布兰德侧后方站立，身体微侧，目光扫过周围环境，保持警惕姿态）
+【风格】科幻写实风格，冷色调为主（深蓝灰海面、银灰航天服、暗紫黑洞光晕），高对比度，光影层次分明（黑洞光晕照亮海面局部，残骸投射深色阴影，驾驶舱内仪器蓝光形成局部亮面）
+【镜头】1. 初始镜头：固定特写，聚焦驾驶舱内库珀面部，画面中心为其双眼，舷窗边缘作为背景框，窗外 “山峦” 轮廓模糊可见；2. 过渡镜头：极速拉远，镜头从面部特写快速拉升至全景，过程带轻微动态模糊，逐步展现驾驶舱、飞船整体、浅海海面及残骸区域；3. 聚焦镜头：拉远后短暂定格全景，随后镜头轻微下移并聚焦海面上的布兰德与道尔，突出二人未察觉危机的状态，同时清晰呈现 “山峦” 实为巨型巨浪的全貌（高约千米，灰黑主体裹挟白色泡沫，底部阴影笼罩海面）；4. 收尾镜头：镜头轻微回拉，再次带起飞船与巨浪的相对位置，强化飞船与人物在巨浪前的渺小感
+【对白】
+（库珀）：（瞳孔收缩，难以置信地低声颤抖）那不是山，那是个浪。
+【音效】紧张急促的管弦乐背景音乐（随镜头拉远逐渐增强），巨浪移动时的沉闷低频轰鸣（从微弱到清晰），驾驶舱内仪器的轻微电子提示音，布兰德操作时的细微金属碰撞音，后续布兰德 “再给我 10 秒” 的模糊惊呼前置音
+/
+'''
+abstract_example = '''
+库珀顺利完成了在米勒星球的降落，米勒星球是一个被海洋覆盖的星球，远处有一个类似 “山峦” 的巨大轮廓，他们走下飞船寻找米勒飞行器的残骸，这时库珀发现原来”山峦“是一个数十米高的巨浪，于是他紧急呼叫两位同伴回飞船。
+'''
+
+
+
 screen_prompt = f'''
-你是一个编剧，你的任务是依据大纲、用户需求创作一个符合用户需求的10秒左右的分镜脚本。要求突出镜头的画面和运动，每个镜头的画面和运动要自然流畅，避免过于复杂。并根据大纲中的简要剧情设计对白。
-大纲示例：{outline_example}；
-剧本举例：{script_example}；
+用户正在用视频生成模型创作AI视频，你的任务是根据用户传入的分镜大纲创作一些用于视频生成的分镜脚本。分镜大纲分好了每一个镜号，每一个镜号要创作一个分镜脚本。
+每个分镜脚本控制大约5秒的镜头。
+每个分镜脚本写完后用’/‘隔开
+单个分镜脚本举例：{script_example}；
 '''
 
 abstract_prompt = f'''
@@ -82,6 +90,66 @@ outline_prompt = f'''
 大纲示例：{outline_example}；
 !!注意!!每个分镜写完后用{'/'}隔开
 '''
+
+class ScreenWriter:
+    def __init__(self):
+        self.last_id = None
+        self.screen = []
+    
+    def init_assistant(self,message):
+        # 创建初始对话，包含outline_writer的prompt和示例
+        completion = client.responses.create(
+            model="doubao-seed-1-6-251015",
+            input=[
+                {
+                    'role':'system',
+                    'content':screen_prompt
+                },
+                {
+                    'role':'user',
+                    'content':message
+                }
+            ],
+            caching={"type": "enabled"}, 
+            thinking={"type": "disabled"},
+            expire_at=int(time.time()) + 360
+        )
+        self.last_id = completion.id
+        return completion.output[-1].content[0].text
+    
+    def call(self,session_data:dict) -> str:
+        """
+        向火山方舟平台发送请求并返回内容
+        :param message: 用户的需求
+        :return: 分镜大纲
+        """
+        if not self.last_id:
+            raw_screen = self.init_assistant(''.join(session_data['material']['idea']))
+            for i in raw_screen.split('/'):
+                self.screen.append(i)
+            return self.screen
+        need_modify = session_data['material']['screen'][session_data['modify_num']-1]
+        completion = client.responses.create(
+            model="doubao-seed-1-6-251015",
+            previous_response_id = self.last_id,
+            input=[
+                {
+                    'role':'system',
+                    'content':f'请根据用户的修改请求，修改这个分镜脚本{need_modify}。这次脚本中不需要加其他特殊符号'
+                },
+                {
+                    'role':'user',
+                    'content':session_data['modify_request']['screen']
+                }
+            ],
+            caching={"type": "enabled"}, 
+            thinking={"type": "disabled"},
+            expire_at=int(time.time()) + 360
+        )
+        self.last_id = completion.id
+        self.screen[session_data['modify_num']-1] = completion.output[-1].content[0].text
+        return self.screen
+
 
 def connect_test(query):
     return f'这里是剧作家，收到请求：{query}'
@@ -149,8 +217,8 @@ class ScreenwriterExecuter(AgentExecutor):
         self, request: RequestContext, event_queue: EventQueue
     ) -> Task | None:
         raise ServerError(error=UnsupportedOperationError())
-    
-        
+
+
 
 class Script:
     def __init__(self,query,name,add):
