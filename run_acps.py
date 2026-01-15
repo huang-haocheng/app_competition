@@ -33,6 +33,8 @@ from agents.writers.screenwriter import ScreenWriter
 from agents.assistant.director_assistant import Assistant
 from agents.writers.outline_writer import OutlineWriter
 from agents.animators.animator_qwen import Animator
+
+from tools.merge_video import merge_videos
 class AgentEntry(TypedDict):
     """缓存单个 Agent 基础信息与预处理关键字。"""
 
@@ -337,8 +339,7 @@ class PersonalAssistantOrchestrator:
         self.assistant = Assistant()
         self.outline_writer = OutlineWriter()
         self.screen_writer = ScreenWriter()
-        
-        
+    
         self.animator = Animator(name=self.project_name,download_link=self.userfile.file_path)
         
     # 构建 LangGraph 状态图，节点集合与 a2a 版本保持一致（intent/confirm/workflow/chat/decline）。
@@ -373,7 +374,6 @@ class PersonalAssistantOrchestrator:
         now_task = session_data["now_task"]
         material = session_data["material"]
         if self.mode == 'test':
-            print(session_data)
             return f'call {now_task}'
         if now_task == "outline":
             res = self.outline_writer.call(session_data)
@@ -385,6 +385,7 @@ class PersonalAssistantOrchestrator:
             video = self.animator.call(session_data)
             state["session_data"]["material"]["video_address"].append(video)
             res = '已完成第'+str(session_data["video_generating"])+'个视频生成'
+            session_data["video_generating"] += 1
         return res
     
     def _get_session_state(self, session_id: str) -> Dict[str, Any]:
@@ -432,6 +433,8 @@ class PersonalAssistantOrchestrator:
             agentans = self.fun_call_agent(state)
             state['session_data']["now_state"] = "None"
             state['reply'] = AssistantReply(agentans)
+            if state['session_data']['video_generating'] > len(state['session_data']['material']['video_address']):
+                state['session_data']['chat_with_assistant'] = False
             return state
         
         if self.mode == 'test':
@@ -541,6 +544,9 @@ class PersonalAssistantOrchestrator:
         print(result_state['session_data'])
         self.userfile.save_content(self.project_name,result_state['session_data']['material'],result_state['session_id'])
         self.userfile.save_session(result_state['session_id'],result_state['session_data'])
+        if result_state['session_data']['chat_with_assistant'] == False:
+            reply.end_session = True
+            merge_videos(result_state['session_data']['material']['video_address'],self.userfile.file_path+self.project_name+'/'+self.project_name+'.mp4')
         # 维护对话轮次计数，便于后续做上下文压缩等扩展。
         return _finalize(reply)
 
@@ -640,6 +646,7 @@ def run_test():
                 print(item)
         if reply.end_session:
             break
+    
 
 if __name__ == "__main__":
     # mtls_config = load_mtls_config_from_json(

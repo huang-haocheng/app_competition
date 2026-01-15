@@ -12,13 +12,15 @@ import asyncio
 #from langchain.checkpoint.memory import InMemorySaver
 from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
 
-import time
 
+import time
+from tools.tool_hub import ark_web_search as web_search_tool
 from tools.web_search import web_search
 
 
 assistant_prompt = PromptTemplate.from_template('''
 你是一个充满活力的导演助手，正在辅助用户使用视频生成模型进行创作。你的任务是{task}。必要的时候，请使用联网搜索工具上网搜索资料。
+！注意！你不能连续发起联网搜索工具调用请求，每次只能发起一次。
 用户没有使用视频生成模型的经验，因此不知道如何在提示词中表达他的想法。此外，用户还很有可能没有进行过视频创作，不知道创作一个视频需要确认哪些要素
 每次给用户返回信息时，必须在信息的最开头加上当前你与用户确认过的想法，例如：“当前我们的想法是做一个...视频，其中....”这部分内容要求你根据你和用户的对话记录，尽可能多地把用户的想法包含在其中，例如角色形象、场景氛围、视频时长、视频主题等。
 当你认为需求的要素齐全后，可以在最后确认需求后，将需求递交给writer智能体。
@@ -34,6 +36,12 @@ task_to_prompt = {
     "screen":"和用户对话，确认他想要如何修改分镜脚本，确保想法足够准确",
 }
 
+material_prompt = PromptTemplate.from_template('''
+这是用户当前的创作材料：
+{material}
+其中，idea是用户通过和你聊天的过程确定的暂时的创作想法，outline是大纲写作者写的视频大纲，screen是分镜写作者写的创作分镜提示词。
+''')
+
 
 # 请确保您已将 API Key 存储在环境变量 ARK_API_KEY 中
 # 初始化Ark客户端，从环境变量中读取您的API Key
@@ -44,27 +52,13 @@ client = Ark(
     api_key='c96dbd1f-aeab-461c-90d6-8096b0baeecd',
 )
 
-tools = [{
-  "type": "function",
-    "name": "web_search",
-    "description": "联网搜索资料。当用户需要了解某个具体的信息，或用户提出的概念你不了解，以及对视频创作有不了解时，使用此工具。",
-    "parameters": {
-        "type": "object",
-        "properties": {
-        "query": {
-            "type": "string",
-            "description": "需要进行联网搜索进行确认的内容"
-        }
-        },
-        "required": ["query"]
-    }
-}]
+
 
 class Assistant:
     def __init__(self):
         self.last_id = None
     
-    def init_assistant(self,user_message):
+    def init_assistant(self,user_message,material):
         completion = client.responses.create(
         # 指定您创建的方舟推理接入点 ID，此处已帮您修改为您的推理接入点 ID
             model="doubao-seed-1-6-251015",
@@ -74,11 +68,15 @@ class Assistant:
                     'content':assistant_prompt.invoke({'task':task_to_prompt["imagination"]}).to_string()
                 },
                 {
+                    'role':'system',
+                    'content':material_prompt.invoke({'material':json.dumps(material, ensure_ascii=False)}).to_string()
+                },
+                {
                     'role':'user',
                     'content':user_message
                 }
             ],
-            tools = tools,
+            tools = web_search_tool,
             caching={"type": "enabled"}, 
             thinking={"type": "disabled"},
             expire_at=int(time.time()) + 360
@@ -93,7 +91,7 @@ class Assistant:
         if session_data['modify_num'] != None:
             modify_material = session_data['material'][now_task][session_data['modify_num']-1]
         if not self.last_id:
-            return self.init_assistant(message)
+            return self.init_assistant(message,material)
         input_prompt = [
                 {
                     'role':'system',
@@ -101,7 +99,7 @@ class Assistant:
                 },
                 {
                     'role':'system',
-                    'content':'现有材料：'+json.dumps(material, ensure_ascii=False)
+                    'content':material_prompt.invoke({'material':json.dumps(material, ensure_ascii=False)}).to_string()
                 },
                 {
                     'role':'user',
@@ -126,35 +124,36 @@ class Assistant:
         return self.next_call(completion)
     
     def next_call(self,previous_message:str):
-        function_call = next(
-            (item for item in previous_message.output if item.type == "function_call"),None
-        )
-        if function_call is None:
-            return previous_message.output[-1].content[0].text
-        else:
-            call_id = function_call.call_id
-            call_arguments = function_call.arguments
-            arg = json.loads(call_arguments)
-            query = arg["query"]
-            result = web_search(query)
-            print('search query:',query)
-            print('search result:',result)
-            completion = client.responses.create(
-                model="doubao-seed-1-6-251015",
-                previous_response_id = self.last_id,
-                input=[
-                    {
-                        'type':'function_call_output',
-                        'call_id':call_id,
-                        'output':json.dumps(result, ensure_ascii=False)
-                    }
-                ],
-                caching={"type": "enabled"}, 
-                thinking={"type": "disabled"},
-                expire_at=int(time.time()) + 360
+        while True:
+            function_call = next(
+                (item for item in previous_message.output if item.type == "function_call"),None
             )
-            self.last_id = completion.id
-            return completion.output[-1].content[0].text
+            if function_call is None:
+                return previous_message.output[-1].content[0].text
+            else:
+                call_id = function_call.call_id
+                call_arguments = function_call.arguments
+                arg = json.loads(call_arguments)
+                query = arg["query"]
+                result = web_search(query)
+                print('search query:',query)
+                completion = client.responses.create(
+                    model="doubao-seed-1-6-251015",
+                    previous_response_id = self.last_id,
+                    input=[
+                        {
+                            'type':'function_call_output',
+                            'call_id':call_id,
+                            'output':json.dumps(result, ensure_ascii=False)
+                        }
+                    ],
+                    caching={"type": "enabled"}, 
+                    thinking={"type": "disabled"},
+                    expire_at=int(time.time()) + 360
+                )
+                self.last_id = completion.id
+                previous_message = completion
+        return previous_message.output[-1].content[0].text
 
 class AssistantExecuter(AgentExecutor):
     def __init__(self):

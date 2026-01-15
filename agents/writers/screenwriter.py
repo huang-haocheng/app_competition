@@ -9,6 +9,8 @@ from a2a.utils import (completed_task, new_artifact)
 from a2a.utils.errors import ServerError
 import asyncio
 import time
+from tools.tool_hub import ark_web_search as tools
+from tools.web_search import web_search
 
 
 
@@ -55,9 +57,10 @@ change_screen_prompt = '''
 
 script_example = '''
 镜号 1
-【场景】米勒星球的浅海区域，海面呈深蓝灰色且平静无波，泛着微弱反光，远处海平面矗立着形似 “山峦” 的巨大轮廓，背景悬着黑洞，投射出淡紫色引力光晕；徘徊者号飞船平稳着陆浅海，船体下半部分浸在水中，布兰德、道尔在不远处的米勒飞船残骸（半浸水中，金属外壳锈蚀、零件散落）旁探寻，库珀留守驾驶舱内观察。
-【角色】库珀（驾驶舱内，身着航天服，双手轻搭操控杆，初始神情专注，后骤然紧绷）、布兰德（残骸旁弯腰，单手扶着残骸边缘，另一只手伸向内部数据接口，专注操作）、道尔（布兰德侧后方站立，身体微侧，目光扫过周围环境，保持警惕姿态）
+场景：米勒星球的浅海区域，海面呈深蓝灰色且平静无波，泛着微弱反光，远处海平面矗立着形似 “山峦” 的巨大轮廓，背景悬着黑洞，投射出淡紫色引力光晕；徘徊者号飞船平稳着陆浅海，船体下半部分浸在水中，布兰德、道尔在不远处的米勒飞船残骸（半浸水中，金属外壳锈蚀、零件散落）旁探寻，库珀留守驾驶舱内观察。
 【风格】科幻写实风格，冷色调为主（深蓝灰海面、银灰航天服、暗紫黑洞光晕），高对比度，光影层次分明（黑洞光晕照亮海面局部，残骸投射深色阴影，驾驶舱内仪器蓝光形成局部亮面）
+角色：库珀：典型的中年男性形象，发型是利落的短黑发，看起来干练，身形偏精瘦硬朗，常穿浅灰 T 恤，面部线条清晰，气质兼具 “父亲的温和” 与 “宇航员的坚毅”。
+运动：库珀在驾驶舱内以高速操控杆操作，初始神情专注，后骤然紧绷，眼神中夹杂着警惕与焦虑。
 【镜头】1. 初始镜头：固定特写，聚焦驾驶舱内库珀面部，画面中心为其双眼，舷窗边缘作为背景框，窗外 “山峦” 轮廓模糊可见；2. 过渡镜头：极速拉远，镜头从面部特写快速拉升至全景，过程带轻微动态模糊，逐步展现驾驶舱、飞船整体、浅海海面及残骸区域；3. 聚焦镜头：拉远后短暂定格全景，随后镜头轻微下移并聚焦海面上的布兰德与道尔，突出二人未察觉危机的状态，同时清晰呈现 “山峦” 实为巨型巨浪的全貌（高约千米，灰黑主体裹挟白色泡沫，底部阴影笼罩海面）；4. 收尾镜头：镜头轻微回拉，再次带起飞船与巨浪的相对位置，强化飞船与人物在巨浪前的渺小感
 【对白】
 （库珀）：（瞳孔收缩，难以置信地低声颤抖）那不是山，那是个浪。
@@ -68,10 +71,9 @@ abstract_example = '''
 库珀顺利完成了在米勒星球的降落，米勒星球是一个被海洋覆盖的星球，远处有一个类似 “山峦” 的巨大轮廓，他们走下飞船寻找米勒飞行器的残骸，这时库珀发现原来”山峦“是一个数十米高的巨浪，于是他紧急呼叫两位同伴回飞船。
 '''
 
-
-
 screen_prompt = f'''
 用户正在用视频生成模型创作AI视频，你的任务是根据用户传入的分镜大纲创作一些用于视频生成的分镜脚本。分镜大纲分好了每一个镜号，每一个镜号要创作一个分镜脚本。
+如果用户传入的大纲中存在你不了解的信息，你需要先使用联网搜索工具确认信息（如角色外形描述等），然后再创作分镜脚本。
 每个分镜脚本控制大约5秒的镜头。
 每个分镜脚本写完后用’/‘隔开
 单个分镜脚本举例：{script_example}；
@@ -100,6 +102,7 @@ class ScreenWriter:
         # 创建初始对话，包含outline_writer的prompt和示例
         completion = client.responses.create(
             model="doubao-seed-1-6-251015",
+            tools = tools,
             input=[
                 {
                     'role':'system',
@@ -115,7 +118,7 @@ class ScreenWriter:
             expire_at=int(time.time()) + 360
         )
         self.last_id = completion.id
-        return completion.output[-1].content[0].text
+        return self.next_call(completion)
     
     def call(self,session_data:dict) -> str:
         """
@@ -147,8 +150,40 @@ class ScreenWriter:
             expire_at=int(time.time()) + 360
         )
         self.last_id = completion.id
-        self.screen[session_data['modify_num']-1] = completion.output[-1].content[0].text
+        self.screen[session_data['modify_num']-1] = self.next_call(completion)
         return self.screen
+    
+    def next_call(self,previous_message):
+        while True:
+            function_call = next(
+                (item for item in previous_message.output if item.type == "function_call"),None
+            )
+            if function_call is None:
+                return previous_message.output[-1].content[0].text
+            else:
+                call_id = function_call.call_id
+                call_arguments = function_call.arguments
+                arg = json.loads(call_arguments)
+                query = arg["query"]
+                result = web_search(query)
+                print('search query:',query)
+                completion = client.responses.create(
+                    model="doubao-seed-1-6-251015",
+                    previous_response_id = self.last_id,
+                    input=[
+                        {
+                            'type':'function_call_output',
+                            'call_id':call_id,
+                            'output':json.dumps(result, ensure_ascii=False)
+                        }
+                    ],
+                    caching={"type": "enabled"}, 
+                    thinking={"type": "disabled"},
+                    expire_at=int(time.time()) + 360
+                )
+                self.last_id = completion.id
+                previous_message = completion
+        return previous_message.output[-1].content[0].text
 
 
 def connect_test(query):
