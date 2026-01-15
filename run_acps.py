@@ -300,7 +300,7 @@ def extract_idea(ai_single_reply):
     :return: 提取到的内容列表（无匹配则返回空列表）
     """
     # 定义关键词（包含两种相关表述）
-    keywords_pattern = r"当前我们(?:的想法|还没有确认具体想法)[^。！？\n]*"
+    keywords_pattern = r"当前我们(?:的想法|还没有确认具体想法)[^？\n]*"
     # 从单次回复中匹配目标内容
     extracted_content = re.findall(keywords_pattern, ai_single_reply)
     # 整理结果，去除空字符串并去重
@@ -329,6 +329,7 @@ class PersonalAssistantOrchestrator:
         #self.assistant = Assistant()
         self._history_store: Dict[str, List[AIMessage | HumanMessage | SystemMessage]] = {}
         self._sessions: Dict[str, Dict[str, Any]] = {}##会话记录加载到这里
+        self._sessions = self.userfile.load_session()
 
         self.outline = None
         self.screen = []
@@ -394,6 +395,7 @@ class PersonalAssistantOrchestrator:
         Returns:
             包含确认标记、候选商品、任务拆解等字段的可变字典。
         """
+        self._sessions = self.userfile.load_session()
         session_data = self._sessions.get(session_id)
         if session_data is None:
             session_data = {
@@ -448,7 +450,6 @@ class PersonalAssistantOrchestrator:
         
         print('idea:',idea)
         return state
-
 
     def outline_node(self,state:ChatGraphState)->ChatGraphState:
         session_id = state["session_id"]
@@ -522,13 +523,16 @@ class PersonalAssistantOrchestrator:
             "user_input": '',
             "session_data": session_data,
         }
-        graph_state["session_data"] = self.intend(graph_state)
-        user_input = input("用户：").strip()
-        text = (user_input or "").strip()
-        if not text:
-            return AssistantReply("请告诉我您的需求或问题，我会尽力帮助。")
+        graph_state["session_data"] = self.route_state(graph_state)
+        text = ''
+        if graph_state["session_data"]["now_state"] != "create":
+            user_input = input("用户：").strip()
+            text = (user_input or "").strip()
+            if not text:
+                return AssistantReply("请告诉我您的需求或问题，我会尽力帮助。")
         # 通过 LangGraph 统一路由当前对话输入。
         graph_state['user_input'] = text
+        graph_state["session_data"] = self.route_task(graph_state)
         result_state = await self._graph.ainvoke(graph_state)
         reply = result_state.get("reply")
         if not isinstance(reply, AssistantReply):
@@ -536,10 +540,11 @@ class PersonalAssistantOrchestrator:
             reply = AssistantReply(str(fallback_text))
         print(result_state['session_data'])
         self.userfile.save_content(self.project_name,result_state['session_data']['material'],result_state['session_id'])
+        self.userfile.save_session(result_state['session_id'],result_state['session_data'])
         # 维护对话轮次计数，便于后续做上下文压缩等扩展。
         return _finalize(reply)
 
-    def intend(self,state:ChatGraphState):
+    def route_state(self,state:ChatGraphState):
         session_id = state["session_id"]
         session_data = state["session_data"]
         user_text = state["user_input"]
@@ -551,6 +556,8 @@ class PersonalAssistantOrchestrator:
                 session_data['now_state'] = 'modify'
                 num = int(input('请选择需要修改的内容序号：'))##这里有前端后改为按钮
                 session_data['modify_num'] = num
+                if now_task == 'animator':
+                    session_data['now_task'] = 'screen'
             if intend == '不需要':
                 session_data['now_state'] = 'create'
                 if now_task == 'outline':
@@ -558,6 +565,14 @@ class PersonalAssistantOrchestrator:
                 if now_task == 'screen':
                     session_data['now_task'] = 'animator'
                     session_data['video_generating'] += 1
+        return session_data
+    
+    def route_task(self,state:ChatGraphState):
+        session_id = state["session_id"]
+        session_data = state["session_data"]
+        user_text = state["user_input"]
+        now_task = session_data["now_task"]
+        now_state = session_data["now_state"]
         if CONFIRM_TEXT.intersection(set(user_text.split())):
             print('收到确认指令')##这里有前端后改为按钮“确认”
             if now_task == "imagination":

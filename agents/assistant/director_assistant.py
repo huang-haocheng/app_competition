@@ -14,14 +14,18 @@ from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
 
 import time
 
+from tools.web_search import web_search
+
 
 assistant_prompt = PromptTemplate.from_template('''
-你是一个充满活力的导演助手，正在辅助用户使用视频生成模型进行创作。你的任务是{task}。必要的时候，请上网搜索资料。
+你是一个充满活力的导演助手，正在辅助用户使用视频生成模型进行创作。你的任务是{task}。必要的时候，请使用联网搜索工具上网搜索资料。
 用户没有使用视频生成模型的经验，因此不知道如何在提示词中表达他的想法。此外，用户还很有可能没有进行过视频创作，不知道创作一个视频需要确认哪些要素
-每次给用户返回信息时，必须在信息的最开头加上当前你与用户确认过的想法，例如：“当前我们的想法是做一个...”
+每次给用户返回信息时，必须在信息的最开头加上当前你与用户确认过的想法，例如：“当前我们的想法是做一个...视频，其中....”这部分内容要求你根据你和用户的对话记录，尽可能多地把用户的想法包含在其中，例如角色形象、场景氛围、视频时长、视频主题等。
 当你认为需求的要素齐全后，可以在最后确认需求后，将需求递交给writer智能体。
 ！注意！以上的对话只是一个示例，用户真正的输入在'user'部分，用户若没有提到他的需求，想法确认部分就写“当前我们还没有确认过的想法。”
+！注意！我们的任务是进行视频创作，请不要在回复中包含任何与视频创作无关的内容。
 你回复的内容只是视频制作的思路，不需要太过详细，详细的内容会由后续的智能体生成
+你后续有负责视频大纲的智能体、负责具体分镜提示词写作的智能体、负责视频生成的智能体。
 ''')
 
 task_to_prompt = {
@@ -40,12 +44,27 @@ client = Ark(
     api_key='c96dbd1f-aeab-461c-90d6-8096b0baeecd',
 )
 
+tools = [{
+  "type": "function",
+    "name": "web_search",
+    "description": "联网搜索资料。当用户需要了解某个具体的信息，或用户提出的概念你不了解，以及对视频创作有不了解时，使用此工具。",
+    "parameters": {
+        "type": "object",
+        "properties": {
+        "query": {
+            "type": "string",
+            "description": "需要进行联网搜索进行确认的内容"
+        }
+        },
+        "required": ["query"]
+    }
+}]
 
 class Assistant:
     def __init__(self):
         self.last_id = None
     
-    def init_assistant(self):
+    def init_assistant(self,user_message):
         completion = client.responses.create(
         # 指定您创建的方舟推理接入点 ID，此处已帮您修改为您的推理接入点 ID
             model="doubao-seed-1-6-251015",
@@ -53,14 +72,19 @@ class Assistant:
                 {
                     'role':'system',
                     'content':assistant_prompt.invoke({'task':task_to_prompt["imagination"]}).to_string()
+                },
+                {
+                    'role':'user',
+                    'content':user_message
                 }
             ],
+            tools = tools,
             caching={"type": "enabled"}, 
             thinking={"type": "disabled"},
             expire_at=int(time.time()) + 360
         )
         self.last_id = completion.id
-        return completion.output[-1].content[0].text
+        return self.next_call(completion)
     
     def call(self, message: str,session_data:dict) -> str:
         now_task = session_data["now_task"]
@@ -69,7 +93,7 @@ class Assistant:
         if session_data['modify_num'] != None:
             modify_material = session_data['material'][now_task][session_data['modify_num']-1]
         if not self.last_id:
-            return self.init_assistant()
+            return self.init_assistant(message)
         input_prompt = [
                 {
                     'role':'system',
@@ -99,7 +123,38 @@ class Assistant:
             expire_at=int(time.time()) + 360
         )
         self.last_id = completion.id
-        return completion.output[-1].content[0].text
+        return self.next_call(completion)
+    
+    def next_call(self,previous_message:str):
+        function_call = next(
+            (item for item in previous_message.output if item.type == "function_call"),None
+        )
+        if function_call is None:
+            return previous_message.output[-1].content[0].text
+        else:
+            call_id = function_call.call_id
+            call_arguments = function_call.arguments
+            arg = json.loads(call_arguments)
+            query = arg["query"]
+            result = web_search(query)
+            print('search query:',query)
+            print('search result:',result)
+            completion = client.responses.create(
+                model="doubao-seed-1-6-251015",
+                previous_response_id = self.last_id,
+                input=[
+                    {
+                        'type':'function_call_output',
+                        'call_id':call_id,
+                        'output':json.dumps(result, ensure_ascii=False)
+                    }
+                ],
+                caching={"type": "enabled"}, 
+                thinking={"type": "disabled"},
+                expire_at=int(time.time()) + 360
+            )
+            self.last_id = completion.id
+            return completion.output[-1].content[0].text
 
 class AssistantExecuter(AgentExecutor):
     def __init__(self):

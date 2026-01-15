@@ -8,11 +8,15 @@ class UserFile:
         self.file_path = f'./user_files/{user}'
         if not os.path.exists(self.file_path):
             os.makedirs(self.file_path)
-        self.user_project = os.listdir(self.file_path)
+        self.user_project = [i for i in os.listdir(self.file_path) if os.path.isdir(os.path.join(self.file_path,i))]
         self.project_content = {}
         for i in self.user_project:
             self.project_content[i] = self.load_content(i)
-    
+        self.session_path = os.path.join(self.file_path,'session_history.json')
+        if not os.path.exists(self.session_path):
+            with open(self.session_path,'w',encoding = 'utf-8') as file:
+                json.dump({}, file, ensure_ascii=False, indent=4)
+
     def init_project(self,project_name):
         i = 1
         new_project_name = project_name
@@ -22,6 +26,13 @@ class UserFile:
         self.user_project.append(new_project_name)
         self.project_content[new_project_name] = None
         os.makedirs(os.path.join(self.file_path,new_project_name))
+        content = {
+            'material':None,
+            'session_id':None
+        }
+        self.project_content[new_project_name] = content
+        with open(os.path.join(self.file_path,new_project_name, 'project.json'), 'w', encoding='utf-8') as file:
+            json.dump(content, file, ensure_ascii=False, indent=4)
         return new_project_name
     
     def load_content(self,project_name):
@@ -38,8 +49,15 @@ class UserFile:
         self.project_content[project_name]['material'] = material
         self.project_content[project_name]['session_id'] = session_id
         with open(os.path.join(self.file_path,project_name, 'project.json'), 'w', encoding='utf-8') as file:
-            json.dump(content, file, ensure_ascii=False, indent=4)
+            json.dump(self.project_content[project_name], file, ensure_ascii=False, indent=4)
     
     def save_session(self,session_id,session_data):
-        pass
-            
+        now_session = self.load_session()
+        now_session[session_id] = session_data
+        with open(self.session_path,'w',encoding = 'utf-8') as file:
+            json.dump(now_session,file,ensure_ascii=False, indent=4)
+
+    def load_session(self):
+        with open(self.session_path,'r',encoding = 'utf-8') as file:
+            now_session = json.load(file)
+            return now_session

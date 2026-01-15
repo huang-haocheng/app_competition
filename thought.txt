@@ -44,3 +44,6 @@ imagination->outline:
 
 如何直接从userfile里加载任务进度:
 直接记录session_id？
+
+现在有一个问题，联网搜索的调用两条路：
+- 使用
